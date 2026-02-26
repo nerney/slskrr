@@ -8,11 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/nerney/slskrr/slskd"
 )
+
+var yearSuffix = regexp.MustCompile(`\s+\(?\d{4}\)?$`)
 
 // videoExtensions are file extensions we consider relevant for Movies/TV.
 var videoExtensions = map[string]bool{
@@ -190,6 +193,20 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 
 	slog.Info("searching slskd", "query", query, "action", action)
 
+	// Extract year from query and check if a year param was provided (Newznab standard).
+	year := q.Get("year")
+	queryWithoutYear := query
+	if year == "" {
+		// Try to strip a trailing year (e.g. "The Matrix 1999" or "The Matrix (1999)")
+		if loc := yearSuffix.FindStringIndex(query); loc != nil {
+			queryWithoutYear = query[:loc[0]]
+			year = strings.TrimSpace(query[loc[0]:])
+		}
+	} else {
+		// Year came as a separate param — strip it from query if present
+		queryWithoutYear = strings.TrimSpace(strings.Replace(query, year, "", 1))
+	}
+
 	responses, err := h.SlskdClient.SearchAndWait(r.Context(), query, h.SearchTimeout)
 	if err != nil {
 		slog.Error("slskd search failed", "error", err)
@@ -197,7 +214,20 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 		return
 	}
 
+	// If the query contained a year, run a fallback search without it to catch
+	// oddly-named Soulseek results that omit the year.
+	if year != "" && queryWithoutYear != "" && queryWithoutYear != query {
+		slog.Info("running fallback search without year", "query", queryWithoutYear)
+		fallbackResponses, err := h.SlskdClient.SearchAndWait(r.Context(), queryWithoutYear, h.SearchTimeout)
+		if err != nil {
+			slog.Warn("fallback search failed, continuing with primary results", "error", err)
+		} else {
+			responses = append(responses, fallbackResponses...)
+		}
+	}
+
 	// Collect and filter results from both regular and locked files
+	seen := make(map[string]bool) // deduplicate by username+filename
 	var items []searchItem
 	for _, resp := range responses {
 		// Combine regular files and locked files into a single pass
@@ -205,6 +235,12 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 		allFiles = append(allFiles, resp.LockedFiles...)
 
 		for _, f := range allFiles {
+			key := resp.Username + "\x00" + f.Filename
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
 			ext := strings.ToLower(path.Ext(f.Filename))
 
 			isVideo := videoExtensions[ext]
@@ -223,6 +259,8 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 			token := EncodeToken(resp.Username, f.Filename, f.Size)
 			// Convert backslashes (Windows paths from Soulseek) to forward slashes
 			basename := path.Base(strings.ReplaceAll(f.Filename, "\\", "/"))
+			// Append human-readable file size to the title for visibility in *arr UIs
+			basename = fmt.Sprintf("%s [%s]", basename, formatSize(f.Size))
 
 			category := "2000"
 			switch {
@@ -347,6 +385,22 @@ func zeroPad(s string) string {
 	return s
 }
 
+// formatSize returns a human-readable file size string.
+func formatSize(bytes int64) string {
+	const (
+		mb = 1024 * 1024
+		gb = 1024 * mb
+	)
+	switch {
+	case bytes >= gb:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(gb))
+	case bytes >= mb:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+	default:
+		return fmt.Sprintf("%d KB", bytes/1024)
+	}
+}
+
 const capsXML = `<?xml version="1.0" encoding="UTF-8"?>
 <caps>
   <server version="1.0" title="slskrr" strapline="Soulseek via slskd" />
@@ -354,7 +408,7 @@ const capsXML = `<?xml version="1.0" encoding="UTF-8"?>
   <searching>
     <search available="yes" supportedParams="q" />
     <tv-search available="yes" supportedParams="q,season,ep" />
-    <movie-search available="yes" supportedParams="q" />
+    <movie-search available="yes" supportedParams="q,year" />
     <music-search available="yes" supportedParams="q,artist,album" />
     <book-search available="yes" supportedParams="q,author,title" />
   </searching>
