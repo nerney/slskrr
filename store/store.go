@@ -27,6 +27,9 @@ type Download struct {
 	Status          Status
 	AddedAt         time.Time
 	CompletedAt     time.Time
+	Retries         int
+	MaxRetries      int
+	TransferID      string // slskd transfer ID for cancellation
 }
 
 func (d *Download) Progress() float64 {
@@ -60,13 +63,14 @@ func (s *Store) Add(username, filename string, size int64, category string) stri
 
 	id := generateID()
 	s.downloads[id] = &Download{
-		ID:       id,
-		Username: username,
-		Filename: filename,
-		Size:     size,
-		Category: category,
-		Status:   StatusQueued,
-		AddedAt:  time.Now(),
+		ID:         id,
+		Username:   username,
+		Filename:   filename,
+		Size:       size,
+		Category:   category,
+		Status:     StatusQueued,
+		AddedAt:    time.Now(),
+		MaxRetries: 3,
 	}
 	return id
 }
@@ -96,6 +100,36 @@ func (s *Store) UpdateTransfer(id string, bytesDownloaded int64, status Status) 
 	dl.Status = status
 	if (status == StatusCompleted || status == StatusFailed) && dl.CompletedAt.IsZero() {
 		dl.CompletedAt = time.Now()
+	}
+}
+
+// IncrementRetry bumps the retry count and resets status to Queued for re-download.
+// Returns true if a retry is allowed, false if max retries exceeded.
+func (s *Store) IncrementRetry(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dl, ok := s.downloads[id]
+	if !ok {
+		return false
+	}
+	dl.Retries++
+	if dl.Retries > dl.MaxRetries {
+		return false
+	}
+	dl.Status = StatusQueued
+	dl.BytesDownloaded = 0
+	dl.CompletedAt = time.Time{}
+	return true
+}
+
+// SetTransferID stores the slskd transfer ID for a download.
+func (s *Store) SetTransferID(id, transferID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if dl, ok := s.downloads[id]; ok {
+		dl.TransferID = transferID
 	}
 }
 

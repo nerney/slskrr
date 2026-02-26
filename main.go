@@ -29,6 +29,14 @@ func main() {
 	slskdClient := slskd.NewClient(cfg.SlskdURL, cfg.SlskdAPIKey)
 	st := store.New()
 
+	// Try to discover slskd's download directory if not explicitly configured
+	if cfg.DownloadDir == "/downloads/complete" {
+		if dir, err := slskdClient.GetDownloadDir(context.Background()); err == nil && dir != "" {
+			slog.Info("discovered slskd download directory", "dir", dir)
+			cfg.DownloadDir = dir
+		}
+	}
+
 	// Compute the base URL for self-referencing download links
 	baseURL := "http://localhost" + cfg.ListenAddr
 

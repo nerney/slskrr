@@ -337,7 +337,7 @@ func (h *Handler) syncOnce(ctx context.Context) {
 		return
 	}
 
-	// Build a map of username+filename → transfer state for quick lookup
+	// Build a map of username+filename → transfer for quick lookup
 	type transferKey struct {
 		username string
 		filename string
@@ -365,15 +365,45 @@ func (h *Handler) syncOnce(ctx context.Context) {
 			continue
 		}
 
+		// Store the slskd transfer ID for potential cancellation
+		if t.ID != "" {
+			h.Store.SetTransferID(dl.ID, t.ID)
+		}
+
+		mapped := slskd.MapTransferState(t.State)
 		var newStatus store.Status
-		switch {
-		case strings.Contains(t.State, "Completed") && strings.Contains(t.State, "Succeeded"):
+		switch mapped {
+		case "completed":
 			newStatus = store.StatusCompleted
-		case strings.Contains(t.State, "Completed"):
-			// Completed but with error/cancelled/timed out
-			newStatus = store.StatusFailed
-		case strings.Contains(t.State, "InProgress"):
+		case "downloading":
 			newStatus = store.StatusDownloading
+		case "failed":
+			// Attempt retry before marking as failed
+			if h.Store.IncrementRetry(dl.ID) {
+				slog.Info("retrying failed download",
+					"id", dl.ID,
+					"filename", dl.Filename,
+					"retry", dl.Retries+1,
+					"state", t.State,
+				)
+				// Cancel the old transfer with two-phase removal
+				if t.ID != "" {
+					go func(username, transferID string) {
+						_ = h.SlskdClient.CancelDownload(context.Background(), username, transferID)
+					}(dl.Username, t.ID)
+				}
+				// Re-queue in slskd
+				go func(username, filename string, size int64) {
+					err := h.SlskdClient.Download(context.Background(), username, []slskd.DownloadRequest{
+						{Filename: filename, Size: size},
+					})
+					if err != nil {
+						slog.Error("retry download failed", "filename", filename, "error", err)
+					}
+				}(dl.Username, dl.Filename, dl.Size)
+				continue
+			}
+			newStatus = store.StatusFailed
 		default:
 			newStatus = store.StatusQueued
 		}
