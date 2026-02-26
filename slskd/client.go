@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -33,17 +34,20 @@ type SearchRequest struct {
 }
 
 type SearchResult struct {
-	ID             string           `json:"id"`
-	SearchText     string           `json:"searchText"`
-	State          string           `json:"state"`
-	ResponseCount  int              `json:"responseCount"`
-	FileCount      int              `json:"fileCount"`
+	ID             string `json:"id"`
+	SearchText     string `json:"searchText"`
+	State          string `json:"state"`
+	IsComplete     bool   `json:"isComplete"`
+	ResponseCount  int    `json:"responseCount"`
+	FileCount      int    `json:"fileCount"`
 }
 
 type SearchResponse struct {
-	Username  string      `json:"username"`
-	FileCount int         `json:"fileCount"`
-	Files     []SlskdFile `json:"files"`
+	Username        string      `json:"username"`
+	FileCount       int         `json:"fileCount"`
+	Files           []SlskdFile `json:"files"`
+	LockedFileCount int         `json:"lockedFileCount"`
+	LockedFiles     []SlskdFile `json:"lockedFiles"`
 }
 
 type SlskdFile struct {
@@ -202,6 +206,7 @@ func (c *Client) SearchAndWait(ctx context.Context, query string, timeout time.D
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline:
+			slog.Warn("search timeout reached, returning partial results", "id", searchID, "query", query)
 			// Timeout reached — return whatever we have
 			responses, err := c.GetSearchResponses(ctx, searchID)
 			// Clean up the search in the background
@@ -211,13 +216,15 @@ func (c *Client) SearchAndWait(ctx context.Context, query string, timeout time.D
 			if err != nil {
 				return nil, fmt.Errorf("get final search responses: %w", err)
 			}
+			slog.Info("search partial results", "id", searchID, "responses", len(responses), "totalFiles", countFiles(responses))
 			return responses, nil
 		case <-ticker.C:
 			result, err := c.GetSearch(ctx, searchID)
 			if err != nil {
 				return nil, err
 			}
-			if result.State != "InProgress" {
+			slog.Debug("search poll", "id", searchID, "state", result.State, "isComplete", result.IsComplete, "responseCount", result.ResponseCount, "fileCount", result.FileCount)
+			if result.IsComplete {
 				responses, err := c.GetSearchResponses(ctx, searchID)
 				go func() {
 					_ = c.DeleteSearch(context.Background(), searchID)
@@ -225,6 +232,7 @@ func (c *Client) SearchAndWait(ctx context.Context, query string, timeout time.D
 				if err != nil {
 					return nil, fmt.Errorf("get search responses: %w", err)
 				}
+				slog.Info("search completed", "id", searchID, "state", result.State, "responses", len(responses), "totalFiles", countFiles(responses))
 				return responses, nil
 			}
 		}
@@ -287,4 +295,12 @@ func (c *Client) GetAllDownloads(ctx context.Context) ([]UserTransferGroup, erro
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", c.APIKey)
+}
+
+func countFiles(responses []SearchResponse) int {
+	n := 0
+	for _, r := range responses {
+		n += len(r.Files) + len(r.LockedFiles)
+	}
+	return n
 }

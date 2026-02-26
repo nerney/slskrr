@@ -189,10 +189,14 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 		return
 	}
 
-	// Collect and filter results
+	// Collect and filter results from both regular and locked files
 	var items []searchItem
 	for _, resp := range responses {
-		for _, f := range resp.Files {
+		// Combine regular files and locked files into a single pass
+		allFiles := resp.Files
+		allFiles = append(allFiles, resp.LockedFiles...)
+
+		for _, f := range allFiles {
 			ext := strings.ToLower(path.Ext(f.Filename))
 
 			isVideo := videoExtensions[ext]
@@ -234,7 +238,7 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 		}
 	}
 
-	slog.Info("search complete", "query", query, "results", len(items))
+	slog.Info("search complete", "query", query, "responses", len(responses), "results", len(items))
 	writeSearchResponse(w, items, h.BaseURL)
 }
 
