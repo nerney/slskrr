@@ -168,13 +168,17 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 
 	if query == "" {
 		if action == "search" {
-			// Prowlarr sends ?t=search with no q= as a connectivity test.
-			// It requires at least one <item> with a valid enclosure and pubDate.
+			// Prowlarr/apps send ?t=search with no q= as a connectivity test.
+			// Each app sends its own cat= filter (e.g. Radarr sends 2000s,
+			// Sonarr sends 5000s, Lidarr sends 3000s). We must return a test
+			// item whose category matches the requested categories, otherwise
+			// the app rejects the indexer with "no results in configured categories."
+			cat := firstCategory(q.Get("cat"))
 			writeSearchResponse(w, []searchItem{{
 				Title:    "slskrr-test",
 				Token:    EncodeToken("slskrr", "test/slskrr-test.mp3", 1),
 				Size:     1,
-				Category: "3000",
+				Category: cat,
 				Username: "slskrr",
 			}}, h.BaseURL)
 		} else {
@@ -321,6 +325,19 @@ func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, "\"", "&quot;")
 	return s
+}
+
+// firstCategory returns the first category from a comma-separated cat= param,
+// falling back to "2000" if none provided. This ensures the test item matches
+// whatever category the requesting app is filtering by.
+func firstCategory(cats string) string {
+	if cats == "" {
+		return "2000"
+	}
+	if i := strings.Index(cats, ","); i > 0 {
+		return cats[:i]
+	}
+	return cats
 }
 
 func zeroPad(s string) string {
