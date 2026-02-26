@@ -25,8 +25,25 @@ var videoExtensions = map[string]bool{
 	".wmv":  true,
 }
 
-// minFileSize is the minimum file size (50MB) to filter out samples/trailers.
-const minFileSize = 50 * 1024 * 1024
+// audioExtensions are file extensions we consider relevant for Music.
+var audioExtensions = map[string]bool{
+	".mp3":  true,
+	".flac": true,
+	".ogg":  true,
+	".opus": true,
+	".m4a":  true,
+	".aac":  true,
+	".wav":  true,
+	".wma":  true,
+	".ape":  true,
+	".alac": true,
+}
+
+// minVideoFileSize is the minimum file size (50MB) to filter out samples/trailers.
+const minVideoFileSize = 50 * 1024 * 1024
+
+// minAudioFileSize is the minimum file size (1MB) to filter out tiny/corrupt files.
+const minAudioFileSize = 1 * 1024 * 1024
 
 // FileToken encodes the slskd file info needed to queue a download later.
 type FileToken struct {
@@ -68,7 +85,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "caps":
 		h.handleCaps(w, r)
-	case "search", "tvsearch", "movie":
+	case "search", "tvsearch", "movie", "music":
 		h.handleSearch(w, r, action)
 	case "get":
 		h.handleGet(w, r)
@@ -112,6 +129,19 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 	case "movie":
 		// q already contains the movie title from Radarr
 		// imdbid alone can't be resolved without an external service
+	case "music":
+		artist := q.Get("artist")
+		album := q.Get("album")
+		if query == "" {
+			parts := []string{}
+			if artist != "" {
+				parts = append(parts, artist)
+			}
+			if album != "" {
+				parts = append(parts, album)
+			}
+			query = strings.Join(parts, " ")
+		}
 	}
 
 	if query == "" {
@@ -133,20 +163,28 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 	for _, resp := range responses {
 		for _, f := range resp.Files {
 			ext := strings.ToLower(path.Ext(f.Filename))
-			if !videoExtensions[ext] {
+
+			isVideo := videoExtensions[ext]
+			isAudio := audioExtensions[ext]
+			if !isVideo && !isAudio {
 				continue
 			}
-			if f.Size < minFileSize {
+			if isVideo && f.Size < minVideoFileSize {
+				continue
+			}
+			if isAudio && f.Size < minAudioFileSize {
 				continue
 			}
 
 			token := EncodeToken(resp.Username, f.Filename, f.Size)
-			basename := path.Base(f.Filename)
 			// Convert backslashes (Windows paths from Soulseek) to forward slashes
-			basename = path.Base(strings.ReplaceAll(f.Filename, "\\", "/"))
+			basename := path.Base(strings.ReplaceAll(f.Filename, "\\", "/"))
 
 			category := "2000"
-			if action == "tvsearch" {
+			switch {
+			case action == "music" || isAudio:
+				category = "3000"
+			case action == "tvsearch":
 				category = "5000"
 			}
 
@@ -256,6 +294,7 @@ const capsXML = `<?xml version="1.0" encoding="UTF-8"?>
     <search available="yes" supportedParams="q" />
     <tv-search available="yes" supportedParams="q,season,ep" />
     <movie-search available="yes" supportedParams="q,imdbid" />
+    <music-search available="yes" supportedParams="q,artist,album" />
   </searching>
   <categories>
     <category id="2000" name="Movies">
@@ -266,6 +305,14 @@ const capsXML = `<?xml version="1.0" encoding="UTF-8"?>
       <subcat id="2045" name="UHD" />
       <subcat id="2050" name="BluRay" />
       <subcat id="2060" name="3D" />
+    </category>
+    <category id="3000" name="Audio">
+      <subcat id="3010" name="MP3" />
+      <subcat id="3020" name="Video" />
+      <subcat id="3030" name="Audiobook" />
+      <subcat id="3040" name="Lossless" />
+      <subcat id="3050" name="Podcast" />
+      <subcat id="3060" name="Other" />
     </category>
     <category id="5000" name="TV">
       <subcat id="5020" name="Foreign" />
