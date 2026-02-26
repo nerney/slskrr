@@ -168,7 +168,15 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 	}
 
 	if query == "" {
-		writeSearchResponse(w, nil, h.BaseURL)
+		// Prowlarr sends ?t=search with no q= as a connectivity test.
+		// It requires at least one <item> with a valid enclosure and pubDate.
+		writeSearchResponse(w, []searchItem{{
+			Title:    "slskrr-test",
+			Token:    EncodeToken("slskrr", "test/slskrr-test.mp3", 1),
+			Size:     1,
+			Category: "3000",
+			Username: "slskrr",
+		}}, h.BaseURL)
 		return
 	}
 
