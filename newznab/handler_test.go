@@ -259,7 +259,11 @@ func TestHandler_EmptySearch(t *testing.T) {
 	if !strings.Contains(body, "<rss") {
 		t.Errorf("expected RSS XML for empty search, got: %s", body)
 	}
-	if strings.Contains(body, "<item>") {
-		t.Error("expected no items for empty search")
+	// Empty search returns a mock test item for Prowlarr compatibility
+	if !strings.Contains(body, "<item>") {
+		t.Error("expected mock test item for empty search (Prowlarr compatibility)")
+	}
+	if !strings.Contains(body, "slskrr-test") {
+		t.Error("expected mock item to contain slskrr-test title")
 	}
 }
