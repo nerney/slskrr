@@ -1,0 +1,13 @@
+services:
+  slskrr:
+    build: .
+    # image: ghcr.io/nerney/slskrr:latest
+    ports:
+      - "6969:6969"
+    environment:
+      - SLSKD_URL=http://slskd:5030
+      - SLSKD_API_KEY=your-slskd-api-key
+      # - API_KEY=your-arr-api-key
+      # - SEARCH_TIMEOUT=30s
+      # - DOWNLOAD_DIR=/downloads/complete
+    restart: unless-stopped

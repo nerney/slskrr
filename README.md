@@ -26,21 +26,39 @@ Prowlarr / Radarr / Sonarr
 - **SABnzbd endpoint** (`/sabnzbd/api`) — accepts download requests from Radarr/Sonarr and triggers file transfers through slskd.
 - **Health check** (`/health`) — returns `ok`.
 
-## Pre-built binaries
-
-Pre-built binaries are available in the [`dist/`](dist/) directory:
-
-| File | Platform |
-|------|----------|
-| `dist/slskrr-linux-amd64` | Linux x86_64 |
-| `dist/slskrr-darwin-arm64` | macOS Apple Silicon |
-| `dist/slskrr-windows-amd64.exe` | Windows x86_64 |
-
-Download the binary for your platform and make it executable:
+## Quick start with Docker Compose
 
 ```bash
-chmod +x slskrr-linux-amd64
+cp docker-compose.yml docker-compose.override.yml
+# edit docker-compose.override.yml with your slskd URL and API key
+docker compose up -d
 ```
+
+## Docker
+
+### Pull from GHCR
+
+```bash
+docker pull ghcr.io/nerney/slskrr:latest
+```
+
+### Run
+
+```bash
+docker run -d \
+  -p 6969:6969 \
+  -e SLSKD_URL=http://your-slskd:5030 \
+  -e SLSKD_API_KEY=your-api-key \
+  ghcr.io/nerney/slskrr:latest
+```
+
+### Build locally
+
+```bash
+docker build -t slskrr .
+```
+
+The Dockerfile uses a multistage build — compiles with `golang:1.24-alpine`, then copies the static binary into a `scratch` image. Final image is just the binary + CA certs (~10 MB).
 
 ## Build from source
 
@@ -48,14 +66,6 @@ Requires Go 1.24+:
 
 ```bash
 go build -o slskrr .
-```
-
-Cross-compile for other platforms:
-
-```bash
-GOOS=linux   GOARCH=amd64 go build -o dist/slskrr-linux-amd64 .
-GOOS=darwin  GOARCH=arm64 go build -o dist/slskrr-darwin-arm64 .
-GOOS=windows GOARCH=amd64 go build -o dist/slskrr-windows-amd64.exe .
 ```
 
 ## Configuration
@@ -112,6 +122,58 @@ slskrr will start on port 6969 by default.
 | `/api` | Newznab | Search and RSS feed for indexers |
 | `/sabnzbd/api` | SABnzbd | Download client for Radarr/Sonarr |
 | `/health` | HTTP | Health check (returns `ok`) |
+
+## Publishing to GHCR
+
+To publish the image to GitHub Container Registry, set up a GitHub Actions workflow or push manually:
+
+```bash
+# log in to GHCR
+echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+
+# build and push
+docker build -t ghcr.io/nerney/slskrr:latest -t ghcr.io/nerney/slskrr:v0.0.1 .
+docker push ghcr.io/nerney/slskrr --all-tags
+```
+
+Or automate it with a GitHub Actions workflow (`.github/workflows/release.yml`):
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+```
+
+This will automatically build and push `ghcr.io/nerney/slskrr:v0.0.1`, `:v0.0`, and `:latest` whenever you push a version tag.
 
 ## License
 
