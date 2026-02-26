@@ -135,7 +135,6 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 		}
 	case "movie":
 		// q already contains the movie title from Radarr
-		// imdbid alone can't be resolved without an external service
 	case "music":
 		artist := q.Get("artist")
 		album := q.Get("album")
@@ -338,7 +337,7 @@ const capsXML = `<?xml version="1.0" encoding="UTF-8"?>
   <searching>
     <search available="yes" supportedParams="q" />
     <tv-search available="yes" supportedParams="q,season,ep" />
-    <movie-search available="yes" supportedParams="q,imdbid" />
+    <movie-search available="yes" supportedParams="q" />
     <music-search available="yes" supportedParams="q,artist,album" />
     <book-search available="yes" supportedParams="q,author,title" />
   </searching>
