@@ -105,21 +105,25 @@ func TestHandler_Search_WithMockSlskd(t *testing.T) {
 				State: "InProgress",
 			})
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/test-search-id"):
-			json.NewEncoder(w).Encode(slskd.SearchResult{
-				ID:    "test-search-id",
-				State: "Completed",
-			})
-		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/responses"):
-			json.NewEncoder(w).Encode([]slskd.SearchResponse{
-				{
-					Username: "cooluser",
-					Files: []slskd.SlskdFile{
-						{Filename: `C:\Movies\The.Matrix.1999.1080p.mkv`, Size: 2000000000},
-						{Filename: `C:\Movies\sample.avi`, Size: 5000000}, // too small, should be filtered
-						{Filename: `C:\Movies\subs.srt`, Size: 50000},     // wrong extension, should be filtered
+			result := slskd.SearchResult{
+				ID:         "test-search-id",
+				State:      "Completed, TimedOut",
+				IsComplete: true,
+			}
+			// Return responses inline when ?includeResponses=true
+			if r.URL.Query().Get("includeResponses") == "true" {
+				result.Responses = []slskd.SearchResponse{
+					{
+						Username: "cooluser",
+						Files: []slskd.SlskdFile{
+							{Filename: `C:\Movies\The.Matrix.1999.1080p.mkv`, Size: 2000000000},
+							{Filename: `C:\Movies\sample.avi`, Size: 5000000}, // too small, should be filtered
+							{Filename: `C:\Movies\subs.srt`, Size: 50000},     // wrong extension, should be filtered
+						},
 					},
-				},
-			})
+				}
+			}
+			json.NewEncoder(w).Encode(result)
 		case r.Method == "DELETE":
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -169,13 +173,13 @@ func TestHandler_TVSearch_QueryConstruction(t *testing.T) {
 			var req slskd.SearchRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			receivedQuery = req.SearchText
-			json.NewEncoder(w).Encode(slskd.SearchResult{ID: "s1", State: "Completed"})
-		case strings.HasSuffix(r.URL.Path, "/responses"):
-			json.NewEncoder(w).Encode([]slskd.SearchResponse{})
+			json.NewEncoder(w).Encode(slskd.SearchResult{ID: "s1", State: "InProgress"})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/s1"):
+			json.NewEncoder(w).Encode(slskd.SearchResult{ID: "s1", State: "Completed, TimedOut", IsComplete: true})
 		case r.Method == "DELETE":
 			w.WriteHeader(http.StatusNoContent)
 		default:
-			json.NewEncoder(w).Encode(slskd.SearchResult{ID: "s1", State: "Completed"})
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer mockSlskd.Close()
