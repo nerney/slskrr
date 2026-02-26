@@ -39,6 +39,13 @@ var audioExtensions = map[string]bool{
 	".alac": true,
 }
 
+// audiobookExtensions are file extensions specific to audiobooks.
+var audiobookExtensions = map[string]bool{
+	".m4b": true,
+	".mp3": true,
+	".aax": true,
+}
+
 // minVideoFileSize is the minimum file size (50MB) to filter out samples/trailers.
 const minVideoFileSize = 50 * 1024 * 1024
 
@@ -85,7 +92,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "caps":
 		h.handleCaps(w, r)
-	case "search", "tvsearch", "movie", "music":
+	case "search", "tvsearch", "movie", "music", "book":
 		h.handleSearch(w, r, action)
 	case "get":
 		h.handleGet(w, r)
@@ -142,6 +149,22 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 			}
 			query = strings.Join(parts, " ")
 		}
+	case "book":
+		author := q.Get("author")
+		title := q.Get("title")
+		if query == "" {
+			parts := []string{}
+			if author != "" {
+				parts = append(parts, author)
+			}
+			if title != "" {
+				parts = append(parts, title)
+			}
+			query = strings.Join(parts, " ")
+		}
+		if query != "" {
+			query += " audiobook"
+		}
 	}
 
 	if query == "" {
@@ -166,13 +189,14 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 
 			isVideo := videoExtensions[ext]
 			isAudio := audioExtensions[ext]
-			if !isVideo && !isAudio {
+			isAudiobook := audiobookExtensions[ext]
+			if !isVideo && !isAudio && !isAudiobook {
 				continue
 			}
 			if isVideo && f.Size < minVideoFileSize {
 				continue
 			}
-			if isAudio && f.Size < minAudioFileSize {
+			if (isAudio || isAudiobook) && f.Size < minAudioFileSize {
 				continue
 			}
 
@@ -182,8 +206,12 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request, action st
 
 			category := "2000"
 			switch {
-			case action == "music" || isAudio:
+			case action == "book":
+				category = "3030" // Audiobook subcategory
+			case action == "music" || (isAudio && !isAudiobook):
 				category = "3000"
+			case isAudiobook:
+				category = "3030"
 			case action == "tvsearch":
 				category = "5000"
 			}
@@ -295,6 +323,7 @@ const capsXML = `<?xml version="1.0" encoding="UTF-8"?>
     <tv-search available="yes" supportedParams="q,season,ep" />
     <movie-search available="yes" supportedParams="q,imdbid" />
     <music-search available="yes" supportedParams="q,artist,album" />
+    <book-search available="yes" supportedParams="q,author,title" />
   </searching>
   <categories>
     <category id="2000" name="Movies">
